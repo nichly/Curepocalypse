@@ -1,0 +1,223 @@
+import pygame
+from pathlib import Path
+
+class Button:
+    def __init__(self, image, pos, callback=None):
+        self.base = image.convert_alpha()
+        self.callback = callback
+        self.scale = 1.0
+        self.target = 1.0
+        self.anim_speed = 8.0
+        self.image = self.base
+        self.rect = self.image.get_rect(center=pos)
+
+    def update(self, dt):
+        self.scale += (self.target - self.scale) * min(1, dt * self.anim_speed)
+        if abs(self.target - self.scale) > 0.001:
+            w = max(1, int(self.base.get_width() * self.scale))
+            h = max(1, int(self.base.get_height() * self.scale))
+            center = self.rect.center
+            self.image = pygame.transform.smoothscale(self.base, (w, h))
+            self.rect = self.image.get_rect(center=center)
+
+    def draw(self, surf):
+        surf.blit(self.image, self.rect)
+
+    def handle_event(self, event):
+        if event.type == pygame.MOUSEMOTION:
+            self.target = 1.1 if self.rect.collidepoint(event.pos) else 1.0
+        elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            if self.rect.collidepoint(event.pos) and self.callback:
+                self.callback()
+
+def main():
+    pygame.init()
+    screen = pygame.display.set_mode((1600, 900), pygame.RESIZABLE)
+    assets_dir = Path(__file__).parent
+
+    # Carrega imagens originais (sem escalar ainda)
+    try:
+        bg_orig = pygame.image.load(str(assets_dir / "fundo.png")).convert_alpha()
+        btn_jogar_orig = pygame.image.load(str(assets_dir / "btn_jogar.png")).convert_alpha()
+        btn_opcoes_orig = pygame.image.load(str(assets_dir / "btn_opcoes.png")).convert_alpha()
+        btn_sair_orig = pygame.image.load(str(assets_dir / "btn_sair.png")).convert_alpha()
+        logo_orig = pygame.image.load(str(assets_dir / "curepotheme.png")).convert_alpha()
+    except pygame.error as e:
+        raise SystemExit(f"Erro ao carregar imagens: {e}")
+
+    # utilitários de escala
+    def get_scaled_bg(size):
+        return pygame.transform.smoothscale(bg_orig, size)
+
+    def get_scaled_logo(screen_size, max_width_ratio=0.45):
+        max_w = int(screen_size[0] * max_width_ratio)
+        ratio = logo_orig.get_width() / logo_orig.get_height()
+        new_w = min(logo_orig.get_width(), max_w)
+        new_h = max(1, int(new_w / ratio))
+        return pygame.transform.smoothscale(logo_orig, (new_w, new_h))
+
+    def get_button_scaled(orig_img, screen_size, width_ratio=0.15):
+        target_w = max(1, int(screen_size[0] * width_ratio))
+        ratio = orig_img.get_width() / orig_img.get_height()
+        target_h = max(1, int(target_w / ratio))
+        return pygame.transform.smoothscale(orig_img, (target_w, target_h))
+
+    # estado/menu
+    menu_state = "menu"
+
+    def open_options():
+        nonlocal menu_state
+        menu_state = "options"
+
+    def start_game():
+        print("Jogar!")
+
+    def quit_game():
+        pygame.event.post(pygame.event.Event(pygame.QUIT))
+
+    # fontes
+    base_font = pygame.font.SysFont(None, 36)
+
+    # cria botão "Voltar" (será atualizado por create_or_update_back_button)
+    back_button = None
+
+    def create_or_update_back_button(screen_size):
+        nonlocal back_button
+        width = max(120, min(360, int(screen_size[0] * 0.14)))
+        height = max(40, int(width / 4))
+        surf = pygame.Surface((width, height), pygame.SRCALPHA)
+        surf.fill((30, 30, 30, 220))
+        txt = base_font.render("Voltar", True, (255, 255, 255))
+        surf.blit(txt, txt.get_rect(center=(width // 2, height // 2)))
+        pos = (screen_size[0] - width // 2 - 20, screen_size[1] - height // 2 - 20)
+        if back_button is None:
+            back_button = Button(surf, pos=pos, callback=lambda: set_menu_state("menu"))
+        else:
+            center = back_button.rect.center
+            back_button.base = surf.convert_alpha()
+            back_button.image = back_button.base
+            back_button.rect = back_button.image.get_rect(center=pos)
+
+    def set_menu_state(s):
+        nonlocal menu_state
+        menu_state = s
+
+    # escala inicial do fundo e logo
+    fundo_img = get_scaled_bg(screen.get_size())
+    logo_img = get_scaled_logo(screen.get_size())
+
+    # escala inicial dos botões (cria superfícies escaladas a partir dos originais)
+    btn_jogar = get_button_scaled(btn_jogar_orig, screen.get_size(), width_ratio=0.16)
+    btn_opcoes = get_button_scaled(btn_opcoes_orig, screen.get_size(), width_ratio=0.16)
+    btn_sair = get_button_scaled(btn_sair_orig, screen.get_size(), width_ratio=0.16)
+
+    # cria Button objects posicionados com espaçamento relativo ao tamanho dos botões
+    def create_buttons_from_scaled():
+        nonlocal buttons
+        spacing = int(btn_jogar.get_height() * 1)
+        center_y = screen.get_height() // 2
+        positions = [
+            (screen.get_width() // 2, center_y),
+            (screen.get_width() // 2, center_y + spacing),
+            (screen.get_width() // 2, center_y + spacing *2)
+        ]
+        buttons = [
+            Button(btn_jogar, pos=positions[0], callback=start_game),
+            Button(btn_opcoes, pos=positions[1], callback=open_options),
+            Button(btn_sair, pos=positions[2], callback=quit_game)
+        ]
+
+    buttons = []
+    create_buttons_from_scaled()
+    create_or_update_back_button(screen.get_size())
+
+    # função para re-escala todos os botões a partir dos originais e atualizar Button objects
+    def scale_all_buttons(screen_size):
+        nonlocal btn_jogar, btn_opcoes, btn_sair, buttons
+        btn_jogar = get_button_scaled(btn_jogar_orig, screen_size, width_ratio=0.15)
+        btn_opcoes = get_button_scaled(btn_opcoes_orig, screen_size, width_ratio=0.15)
+        btn_sair = get_button_scaled(btn_sair_orig, screen_size, width_ratio=0.15)
+
+        # se buttons já existem, atualiza as imagens mantendo centers relativos
+        if buttons:
+            # recalcula spacing e positions para centralizar verticalmente
+            spacing = int(btn_jogar.get_height() * 1.2)
+            center_y = screen_size[1] // 2
+            positions = [
+                (screen_size[0] // 2, center_y - spacing),
+                (screen_size[0] // 2, center_y),
+                (screen_size[0] // 2, center_y + spacing)
+            ]
+            for btn_obj, new_surf, pos in zip(buttons, (btn_jogar, btn_opcoes, btn_sair), positions):
+                btn_obj.base = new_surf.convert_alpha()
+                btn_obj.image = btn_obj.base
+                btn_obj.rect = btn_obj.image.get_rect(center=pos)
+
+        # atualiza back_button
+        create_or_update_back_button(screen_size)
+
+    clock = pygame.time.Clock()
+    running = True
+
+    while running:
+        dt = clock.tick(60) / 1000.0
+
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+            elif event.type == pygame.VIDEORESIZE:
+                screen = pygame.display.set_mode(event.size, pygame.RESIZABLE)
+                fundo_img = get_scaled_bg(event.size)
+                logo_img = get_scaled_logo(event.size)
+                scale_all_buttons(event.size)
+            # encaminha eventos só para os botões ativos conforme estado
+            if menu_state == "menu":
+                for btn in buttons:
+                    btn.handle_event(event)
+            elif menu_state == "options":
+                back_button.handle_event(event)
+
+        # atualiza apenas os botões visíveis
+        if menu_state == "menu":
+            for btn in buttons:
+                btn.update(dt)
+        elif menu_state == "options":
+            back_button.update(dt)
+
+        screen.fill((0, 0, 0))
+        screen.blit(fundo_img, (0, 0))
+
+        # desenha logo no topo (sempre)
+        logo_rect = logo_img.get_rect(midtop=(screen.get_width() // 2, 18))
+        screen.blit(logo_img, logo_rect)
+
+        # desenha UI conforme estado
+        if menu_state == "menu":
+            for btn in buttons:
+                btn.draw(screen)
+        elif menu_state == "options":
+            # overlay que cobre toda a tela
+            overlay = pygame.Surface(screen.get_size(), pygame.SRCALPHA)
+            overlay.fill((0, 0, 0, 150))
+            screen.blit(overlay, (0, 0))
+
+            # painel central
+            panel_w, panel_h = int(screen.get_width() * 0.6), int(screen.get_height() * 0.6)
+            panel = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
+            panel.fill((20, 20, 20, 240))
+            panel_rect = panel.get_rect(center=(screen.get_width() // 2, screen.get_height() // 2))
+            screen.blit(panel, panel_rect.topleft)
+
+            # título
+            title = base_font.render("Opções", True, (255, 255, 255))
+            screen.blit(title, title.get_rect(center=(panel_rect.centerx, panel_rect.top + 40)))
+
+            # desenha o botão de voltar
+            back_button.draw(screen)
+
+        pygame.display.flip()
+
+    pygame.quit()
+
+if __name__ == "__main__":
+    main()
