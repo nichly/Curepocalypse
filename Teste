@@ -1,0 +1,194 @@
+import pygame
+from pathlib import Path
+
+class Button: #classe dos botões
+    def __init__(self, surf, center, callback=None):
+        self.base = surf.convert_alpha()
+        self.image = self.base
+        self.rect = self.image.get_rect(center=center)
+        self.callback = callback
+        self.scale = 1.0
+        self.target = 1.0
+        self.anim_speed = 8.0
+
+    def set_surface(self, surf, center=None):
+        self.base = surf.convert_alpha()
+        self.image = self.base
+        if center is not None:
+            self.rect = self.image.get_rect(center=center)
+        else:
+            self.rect = self.image.get_rect(center=self.rect.center)
+
+    def update(self, dt):
+        self.scale += (self.target - self.scale) * min(1, dt * self.anim_speed)
+        if abs(self.target - self.scale) > 0.001:
+            w = max(1, int(self.base.get_width() * self.scale))
+            h = max(1, int(self.base.get_height() * self.scale))
+            c = self.rect.center
+            self.image = pygame.transform.smoothscale(self.base, (w, h))
+            self.rect = self.image.get_rect(center=c)
+
+    def draw(self, surf):
+        surf.blit(self.image, self.rect)
+
+    def handle_event(self, event):
+        if event.type == pygame.MOUSEMOTION:
+            self.target = 1.1 if self.rect.collidepoint(event.pos) else 1.0
+        elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            if self.rect.collidepoint(event.pos) and self.callback:
+                self.callback()
+
+def load_image(p, name): #função pra carregar imagens
+    return pygame.image.load(str(p / name)).convert_alpha()
+
+def make_back_surface(font, width, height): #botão pra criar a superficie de voltar
+    s = pygame.Surface((width, height), pygame.SRCALPHA)
+    s.fill((30, 30, 30, 220))
+    txt = font.render("Voltar", True, (255,255,255))
+    s.blit(txt, txt.get_rect(center=(width//2, height//2)))
+    return s
+
+def main(): #função principal
+    pygame.init()
+    assets = Path(__file__).parent
+    screen = pygame.display.set_mode((1600, 900), pygame.RESIZABLE)
+    clock = pygame.time.Clock()
+    font = pygame.font.SysFont(None, 36)
+
+    # carregar as imagens originais
+    try:
+        bg_orig = load_image(assets, "fundo.png")
+        btn_jogar_orig = load_image(assets, "btn_jogar.png")
+        btn_opcoes_orig = load_image(assets, "btn_opcoes.png")
+        btn_sair_orig = load_image(assets, "btn_sair.png")
+        logo_orig = load_image(assets, "curepotheme.png")
+    except pygame.error as e:
+        raise SystemExit(f"Erro ao carregar imagens: {e}")
+
+    def scale_bg(size): 
+        return pygame.transform.smoothscale(bg_orig, size)
+
+    def scale_logo(size, max_ratio=0.45):
+        max_w = int(size[0] * max_ratio)
+        r = logo_orig.get_width() / logo_orig.get_height()
+        w = min(logo_orig.get_width(), max_w)
+        h = max(1, int(w / r))
+        return pygame.transform.smoothscale(logo_orig, (w, h))
+
+    def scale_button(orig, size, width_ratio=0.15):
+        w = max(1, int(size[0] * width_ratio))
+        r = orig.get_width() / orig.get_height()
+        h = max(1, int(w / r))
+        return pygame.transform.smoothscale(orig, (w, h))
+
+    # estado do menu (menu ou opções)
+    menu_state = "menu"
+
+    def open_options():
+        nonlocal menu_state
+        menu_state = "options"
+
+    def start_game(): #é dentro dessa Def q o jogo vai ficar
+        print("Jogar!")
+
+    def quit_game(): #auto explicativo.
+        pygame.event.post(pygame.event.Event(pygame.QUIT))
+
+    # escala inicial do menu
+    size = screen.get_size()
+    bg = scale_bg(size)
+    logo = scale_logo(size)
+    bj = scale_button(btn_jogar_orig, size)
+    bo = scale_button(btn_opcoes_orig, size)
+    bs = scale_button(btn_sair_orig, size)
+
+    # criação dos botões e suas posições
+    def create_menu_buttons():
+        spacing = int(bj.get_height() * 1.0)
+        cx = screen.get_width() // 2
+        cy = screen.get_height() // 2
+        return [
+            Button(bj, (cx, cy), start_game),
+            Button(bo, (cx, cy + spacing), open_options),
+            Button(bs, (cx, cy + spacing*2), quit_game)
+        ]
+
+    buttons = create_menu_buttons()
+
+   
+    def create_back_button():
+        w = max(120, min(360, int(screen.get_width() * 0.14)))
+        h = max(40, int(w / 4))
+        surf = make_back_surface(font, w, h)
+        pos = (screen.get_width() - w//2 - 20, screen.get_height() - h//2 - 20)
+        return Button(surf, pos, lambda: setattr_nonlocal("menu"))
+
+ 
+    def setattr_nonlocal(target):
+        nonlocal menu_state
+        menu_state = target
+
+    back_button = create_back_button()
+
+    running = True
+    while running:
+        dt = clock.tick(60) / 1000.0
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+            elif event.type == pygame.VIDEORESIZE:
+                screen = pygame.display.set_mode(event.size, pygame.RESIZABLE)
+                size = screen.get_size()
+                bg = scale_bg(size)
+                logo = scale_logo(size)
+                # reescala os botões
+                bj = scale_button(btn_jogar_orig, size)
+                bo = scale_button(btn_opcoes_orig, size)
+                bs = scale_button(btn_sair_orig, size)
+                # recria os botões com as novas superficies
+                buttons = create_menu_buttons()
+                back_button = create_back_button()
+            # volta o menu ou trata eventos dos botões
+            if menu_state == "menu":
+                for b in buttons:
+                    b.handle_event(event)
+            else:
+                back_button.handle_event(event)
+
+        # atualiza a porra dos botões
+        if menu_state == "menu":
+            for b in buttons:
+                b.update(dt)
+        else:
+            back_button.update(dt)
+
+        # faz dezenhozinho bonitinho
+        screen.fill((0,0,0))
+        screen.blit(bg, (0,0))
+        # coloca a logo no topo (falta fazer a logo de verdade, por enquanto é só o nome curepocalypse)
+        lr = logo.get_rect(midtop=(screen.get_width()//2, 18))
+        screen.blit(logo, lr)
+
+        if menu_state == "menu":
+            for b in buttons:
+                b.draw(screen)
+        else:
+            # tudo que eu expliquei antes só q junto. mecha aqui pra mudar a posição do painel (pfv n mecha)
+            overlay = pygame.Surface(screen.get_size(), pygame.SRCALPHA)
+            overlay.fill((0,0,0,150))
+            screen.blit(overlay, (0,0))
+            pw, ph = int(screen.get_width()*0.6), int(screen.get_height()*0.6)
+            panel = pygame.Surface((pw, ph), pygame.SRCALPHA)
+            panel.fill((20,20,20,240))
+            pr = panel.get_rect(center=(screen.get_width()//2, screen.get_height()//2))
+            screen.blit(panel, pr.topleft)
+            title = font.render("Opções", True, (255,255,255))
+            screen.blit(title, title.get_rect(center=(pr.centerx, pr.top + 40)))
+            back_button.draw(screen)
+
+        pygame.display.flip()
+
+    pygame.quit()
+
+if __name__ == "__main__":
+    main()
