@@ -1,7 +1,8 @@
+import os
 import pygame
 from pathlib import Path
 
-class Button: #classe dos botões
+class Button:
     def __init__(self, surf, center, callback=None):
         self.base = surf.convert_alpha()
         self.image = self.base
@@ -14,10 +15,7 @@ class Button: #classe dos botões
     def set_surface(self, surf, center=None):
         self.base = surf.convert_alpha()
         self.image = self.base
-        if center is not None:
-            self.rect = self.image.get_rect(center=center)
-        else:
-            self.rect = self.image.get_rect(center=self.rect.center)
+        self.rect = self.image.get_rect(center=(center or self.rect.center))
 
     def update(self, dt):
         self.scale += (self.target - self.scale) * min(1, dt * self.anim_speed)
@@ -38,24 +36,27 @@ class Button: #classe dos botões
             if self.rect.collidepoint(event.pos) and self.callback:
                 self.callback()
 
-def load_image(p, name): #função pra carregar imagens
-    return pygame.image.load(str(p / name)).convert_alpha()
+def load_image(folder, name):
+    return pygame.image.load(str(folder / name)).convert_alpha()
 
-def make_back_surface(font, width, height): #botão pra criar a superficie de voltar
-    s = pygame.Surface((width, height), pygame.SRCALPHA)
-    s.fill((30, 30, 30, 220))
-    txt = font.render("Voltar", True, (255,255,255))
-    s.blit(txt, txt.get_rect(center=(width//2, height//2)))
+def make_text_button(font, text, w, h, bg=(60,60,80,230), color=(255,255,255)):
+    s = pygame.Surface((w,h), pygame.SRCALPHA)
+    s.fill(bg)
+    txt = font.render(text, True, color)
+    s.blit(txt, txt.get_rect(center=(w//2, h//2)))
     return s
 
-def main(): #função principal
+def make_back_surface(font, w, h, text="Voltar"):
+    return make_text_button(font, text, w, h, bg=(30,30,30,220))
+
+def main():
     pygame.init()
     assets = Path(__file__).parent
     screen = pygame.display.set_mode((1600, 900), pygame.RESIZABLE)
     clock = pygame.time.Clock()
     font = pygame.font.SysFont(None, 36)
 
-    # carregar as imagens originais
+    # load originals
     try:
         bg_orig = load_image(assets, "fundo.png")
         btn_jogar_orig = load_image(assets, "btn_jogar.png")
@@ -65,7 +66,7 @@ def main(): #função principal
     except pygame.error as e:
         raise SystemExit(f"Erro ao carregar imagens: {e}")
 
-    def scale_bg(size): 
+    def scale_bg(size):
         return pygame.transform.smoothscale(bg_orig, size)
 
     def scale_logo(size, max_ratio=0.45):
@@ -73,62 +74,149 @@ def main(): #função principal
         r = logo_orig.get_width() / logo_orig.get_height()
         w = min(logo_orig.get_width(), max_w)
         h = max(1, int(w / r))
-        return pygame.transform.smoothscale(logo_orig, (w, h))
+        return pygame.transform.smoothscale(logo_orig, (w,h))
 
-    def scale_button(orig, size, width_ratio=0.15):
+    def scale_btn(orig, size, width_ratio=0.15):
         w = max(1, int(size[0] * width_ratio))
         r = orig.get_width() / orig.get_height()
         h = max(1, int(w / r))
-        return pygame.transform.smoothscale(orig, (w, h))
+        return pygame.transform.smoothscale(orig, (w,h))
 
-    # estado do menu (menu ou opções)
-    menu_state = "menu"
+    # state
+    menu_state = "menu"   # "menu" | "options"
+    RESOLUTIONS = [(1280,720), (1600,900), (1920,1080)]
+    selected_index = 1 if (1600,900) in RESOLUTIONS else 0
+    borderless = False
 
-    def open_options():
-        nonlocal menu_state
-        menu_state = "options"
-
-    def start_game(): #é dentro dessa Def q o jogo vai ficar
-        print("Jogar!")
-
-    def quit_game(): #auto explicativo.
-        pygame.event.post(pygame.event.Event(pygame.QUIT))
-
-    # escala inicial do menu
+    # surfaces scaled (updated on resize/apply)
     size = screen.get_size()
-    bg = scale_bg(size)
-    logo = scale_logo(size)
-    bj = scale_button(btn_jogar_orig, size)
-    bo = scale_button(btn_opcoes_orig, size)
-    bs = scale_button(btn_sair_orig, size)
+    bg_surf = scale_bg(size)
+    logo_surf = scale_logo(size)
+    bj_surf = scale_btn(btn_jogar_orig, size)
+    bo_surf = scale_btn(btn_opcoes_orig, size)
+    bs_surf = scale_btn(btn_sair_orig, size)
 
-    # criação dos botões e suas posições
+    # create menu buttons based on current scaled surfaces
     def create_menu_buttons():
-        spacing = int(bj.get_height() * 1.0)
+        spacing = int(bj_surf.get_height() * 1.0)
         cx = screen.get_width() // 2
         cy = screen.get_height() // 2
         return [
-            Button(bj, (cx, cy), start_game),
-            Button(bo, (cx, cy + spacing), open_options),
-            Button(bs, (cx, cy + spacing*2), quit_game)
+            Button(bj_surf, (cx, cy), lambda: print("Jogar!")),
+            Button(bo_surf, (cx, cy + spacing), lambda: set_state("options")),
+            Button(bs_surf, (cx, cy + spacing*2), lambda: pygame.event.post(pygame.event.Event(pygame.QUIT))),
         ]
 
     buttons = create_menu_buttons()
 
-   
     def create_back_button():
         w = max(120, min(360, int(screen.get_width() * 0.14)))
         h = max(40, int(w / 4))
-        surf = make_back_surface(font, w, h)
         pos = (screen.get_width() - w//2 - 20, screen.get_height() - h//2 - 20)
-        return Button(surf, pos, lambda: setattr_nonlocal("menu"))
-
- 
-    def setattr_nonlocal(target):
-        nonlocal menu_state
-        menu_state = target
+        return Button(make_back_surface(font, w, h), pos, lambda: set_state("menu"))
 
     back_button = create_back_button()
+
+    # options UI build
+    res_buttons = []
+    toggle_window_btn = None
+    toggle_borderless_btn = None
+    apply_button = None
+
+    def rebuild_options_ui():
+        nonlocal res_buttons, toggle_window_btn, toggle_borderless_btn, apply_button
+        pw, ph = int(screen.get_width()*0.6), int(screen.get_height()*0.6)
+        panel_rect = pygame.Rect(0,0,pw,ph)
+        panel_rect.center = (screen.get_width()//2, screen.get_height()//2)
+
+        # resolution list (as buttons inside panel)
+        res_buttons = []
+        btn_w = max(140, int(panel_rect.width * 0.6))
+        btn_h = max(40, int(btn_w / 4))
+        start_y = panel_rect.top + 80
+        gap = btn_h + 12
+        cx = panel_rect.centerx
+        for i, res in enumerate(RESOLUTIONS):
+            selected = (i == selected_index)
+            bg = (80,120,160,230) if selected else (60,60,80,230)
+            surf = make_text_button(font, f"{res[0]} x {res[1]}", btn_w, btn_h, bg=bg)
+            pos = (cx, start_y + i*gap)
+            def make_cb(idx):
+                return lambda: set_selected(idx)
+            res_buttons.append(Button(surf, pos, make_cb(i)))
+
+        # toggles
+        tb_w = max(120, int(panel_rect.width * 0.28))
+        tb_h = max(40, int(tb_w / 4))
+        toggle_y = start_y + len(RESOLUTIONS)*gap + 20
+
+        surf_win = make_text_button(font, "Janela (Fullscreen)", tb_w, tb_h, bg=(90,160,90,230) if not borderless else (60,60,80,230))
+        pos_win = (panel_rect.centerx - tb_w//2 - 10, toggle_y)
+        toggle_window_btn = Button(surf_win, pos_win, lambda: set_borderless(False))
+
+        surf_b = make_text_button(font, "Sem bordas", tb_w, tb_h, bg=(200,130,70,230) if borderless else (60,60,80,230))
+        pos_b = (panel_rect.centerx + tb_w//2 + 10, toggle_y)
+        toggle_borderless_btn = Button(surf_b, pos_b, lambda: set_borderless(True))
+
+        # apply
+        ap_w = max(140, int(panel_rect.width * 0.25))
+        ap_h = max(40, int(ap_w / 4))
+        surf_ap = make_text_button(font, "Aplicar", ap_w, ap_h, bg=(70,130,220,240))
+        pos_ap = (panel_rect.centerx, toggle_y + tb_h + 20)
+        apply_button = Button(surf_ap, pos_ap, lambda: apply_resolution(RESOLUTIONS[selected_index], borderless))
+
+        return panel_rect
+
+    def set_state(s):
+        nonlocal menu_state
+        menu_state = s
+        if s == "options":
+            rebuild_options_ui()
+
+    def set_selected(idx):
+        nonlocal selected_index
+        selected_index = idx
+        rebuild_options_ui()
+
+    def set_borderless(v):
+        nonlocal borderless
+        borderless = v
+        rebuild_options_ui()
+
+    def apply_resolution(res, borderless_flag):
+        nonlocal screen, size, bg_surf, logo_surf, bj_surf, bo_surf, bs_surf, buttons, back_button
+        # If borderless_flag is True -> create a NOFRAME window centered on the desktop.
+        # If borderless_flag is False -> use REAL fullscreen mode so "Janela (Fullscreen)" behaves like fullscreen.
+        if borderless_flag:
+            flags = pygame.NOFRAME
+            info = pygame.display.Info()
+            desktop_w, desktop_h = info.current_w, info.current_h
+            x = max(0, (desktop_w - res[0]) // 2)
+            y = max(0, (desktop_h - res[1]) // 2)
+            os.environ["SDL_VIDEO_WINDOW_POS"] = f"{x},{y}"
+        else:
+            # use REAL fullscreen so the window occupies the screen like fullscreen
+            flags = pygame.FULLSCREEN
+
+            # ensure no leftover manual position
+            os.environ.pop("SDL_VIDEO_WINDOW_POS", None)
+
+        screen = pygame.display.set_mode(res, flags)
+        size = screen.get_size()
+
+        # rescale everything
+        bg_surf = scale_bg(size)
+        logo_surf = scale_logo(size)
+        bj_surf = scale_btn(btn_jogar_orig, size)
+        bo_surf = scale_btn(btn_opcoes_orig, size)
+        bs_surf = scale_btn(btn_sair_orig, size)
+        buttons = create_menu_buttons()
+        back_button = create_back_button()
+        if menu_state == "options":
+            rebuild_options_ui()
+
+    # initial build of options ui
+    panel_rect = rebuild_options_ui()
 
     running = True
     while running:
@@ -136,54 +224,68 @@ def main(): #função principal
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
+
             elif event.type == pygame.VIDEORESIZE:
+                # user resized window manually => treat as windowed resize
                 screen = pygame.display.set_mode(event.size, pygame.RESIZABLE)
                 size = screen.get_size()
-                bg = scale_bg(size)
-                logo = scale_logo(size)
-                # reescala os botões
-                bj = scale_button(btn_jogar_orig, size)
-                bo = scale_button(btn_opcoes_orig, size)
-                bs = scale_button(btn_sair_orig, size)
-                # recria os botões com as novas superficies
+                bg_surf = scale_bg(size)
+                logo_surf = scale_logo(size)
+                bj_surf = scale_btn(btn_jogar_orig, size)
+                bo_surf = scale_btn(btn_opcoes_orig, size)
+                bs_surf = scale_btn(btn_sair_orig, size)
                 buttons = create_menu_buttons()
                 back_button = create_back_button()
-            # volta o menu ou trata eventos dos botões
+                panel_rect = rebuild_options_ui()
+
+            # route events to visible controls
             if menu_state == "menu":
                 for b in buttons:
                     b.handle_event(event)
             else:
                 back_button.handle_event(event)
+                for rb in res_buttons:
+                    rb.handle_event(event)
+                toggle_window_btn.handle_event(event)
+                toggle_borderless_btn.handle_event(event)
+                apply_button.handle_event(event)
 
-        # atualiza a porra dos botões
+        # update
         if menu_state == "menu":
             for b in buttons:
                 b.update(dt)
         else:
             back_button.update(dt)
+            for rb in res_buttons:
+                rb.update(dt)
+            toggle_window_btn.update(dt)
+            toggle_borderless_btn.update(dt)
+            apply_button.update(dt)
 
-        # faz dezenhozinho bonitinho
+        # draw
         screen.fill((0,0,0))
-        screen.blit(bg, (0,0))
-        # coloca a logo no topo (falta fazer a logo de verdade, por enquanto é só o nome curepocalypse)
-        lr = logo.get_rect(midtop=(screen.get_width()//2, 18))
-        screen.blit(logo, lr)
+        screen.blit(bg_surf, (0,0))
+        screen.blit(logo_surf, logo_surf.get_rect(midtop=(screen.get_width()//2, 18)))
 
         if menu_state == "menu":
             for b in buttons:
                 b.draw(screen)
         else:
-            # tudo que eu expliquei antes só q junto. mecha aqui pra mudar a posição do painel (pfv n mecha)
             overlay = pygame.Surface(screen.get_size(), pygame.SRCALPHA)
             overlay.fill((0,0,0,150))
             screen.blit(overlay, (0,0))
-            pw, ph = int(screen.get_width()*0.6), int(screen.get_height()*0.6)
-            panel = pygame.Surface((pw, ph), pygame.SRCALPHA)
+
+            panel = pygame.Surface((panel_rect.width, panel_rect.height), pygame.SRCALPHA)
             panel.fill((20,20,20,240))
-            pr = panel.get_rect(center=(screen.get_width()//2, screen.get_height()//2))
-            screen.blit(panel, pr.topleft)
+            screen.blit(panel, panel_rect.topleft)
             title = font.render("Opções", True, (255,255,255))
-            screen.blit(title, title.get_rect(center=(pr.centerx, pr.top + 40)))
+            screen.blit(title, title.get_rect(center=(panel_rect.centerx, panel_rect.top + 40)))
+
+            for rb in res_buttons:
+                rb.draw(screen)
+            toggle_window_btn.draw(screen)
+            toggle_borderless_btn.draw(screen)
+            apply_button.draw(screen)
             back_button.draw(screen)
 
         pygame.display.flip()
